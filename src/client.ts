@@ -2,6 +2,7 @@ import { API_PATH, READ_ACTION_PATTERN } from './constants.js';
 import type { WebfleetCredentials } from './credentials.js';
 import { WebfleetApiError } from './errors.js';
 
+const REQUEST_TIMEOUT_MS = 30_000;
 const FORBIDDEN_QUERY_KEYS = new Set(['username', 'password', 'user', 'passwd']);
 const RESERVED_QUERY_KEYS = new Set(['account', 'apikey', 'action', 'outputformat', 'useutf8', 'useiso8601', 'lang']);
 
@@ -80,10 +81,17 @@ export async function parseWebfleetResponse(response: {
   }
 
   if (text.startsWith('[') || text.startsWith('{')) {
+    let parsedJson: unknown;
+    let isJson = false;
     try {
-      return JSON.parse(text) as unknown;
+      parsedJson = JSON.parse(text);
+      isJson = true;
     } catch {
       // Fall through to the plain-text error form.
+    }
+    if (isJson) {
+      if (response.ok) return parsedJson;
+      throw new WebfleetApiError(String(response.status), text.slice(0, 500) || response.statusText, response.status);
     }
   }
 
@@ -122,6 +130,7 @@ export class WebfleetClient {
         Authorization: basicAuthHeader(this.credentials),
         Accept: 'application/json',
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return parseWebfleetResponse(response);
   }

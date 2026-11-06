@@ -19,29 +19,21 @@ export function toMcpError(error: unknown): McpError {
 
   if (error instanceof WebfleetApiError) {
     const code = error.code;
+    const detail = `HTTP ${error.status}, code ${code}`;
     if (code === '401' || error.status === 401) {
-      return new McpError(ErrorCode.InvalidRequest, 'Invalid WEBFLEET.connect credentials');
+      return new McpError(ErrorCode.InvalidRequest, `Invalid WEBFLEET.connect credentials (${detail}): ${error.message}`);
     }
     if (code === '403' || error.status === 403) {
-      return new McpError(ErrorCode.InvalidRequest, 'WEBFLEET.connect access forbidden');
+      return new McpError(ErrorCode.InvalidRequest, `WEBFLEET.connect access forbidden (${detail}): ${error.message}`);
     }
-    if (error.status === 429 || /limit/i.test(error.message)) {
-      return new McpError(ErrorCode.InvalidRequest, `WEBFLEET.connect rate limit exceeded (${error.message})`);
+    // 8011 is WEBFLEET.connect's "request quota reached" error.
+    if (error.status === 429 || code === '8011') {
+      return new McpError(ErrorCode.InvalidRequest, `WEBFLEET.connect rate limit exceeded (${detail}): ${error.message}`);
     }
-    return new McpError(ErrorCode.InvalidRequest, error.message);
+    return new McpError(ErrorCode.InvalidRequest, `${error.message} (${detail})`);
   }
 
   const errorMessage = error instanceof Error ? error.message : String(error);
-
-  if (errorMessage.includes('401')) {
-    return new McpError(ErrorCode.InvalidRequest, 'Invalid WEBFLEET.connect credentials');
-  }
-  if (errorMessage.includes('429')) {
-    return new McpError(ErrorCode.InvalidRequest, 'WEBFLEET.connect rate limit exceeded');
-  }
-  if (/\b(500|502|503)\b/.test(errorMessage)) {
-    return new McpError(ErrorCode.InternalError, 'WEBFLEET.connect service error');
-  }
 
   return new McpError(ErrorCode.InternalError, `WEBFLEET.connect error: ${errorMessage}`);
 }

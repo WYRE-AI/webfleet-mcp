@@ -59,9 +59,9 @@
         },
         {
           "name": "MCP_TRANSPORT",
-          "description": "Transport mode for the server. Set to 'stdio' for local CLI use; the image defaults to 'http' for gateway hosting.",
-          "isRequired": false,
-          "default": "stdio",
+          "description": "Transport mode. Fixed to stdio for registry clients; the image itself defaults to http for gateway hosting.",
+          "isRequired": true,
+          "value": "stdio",
           "format": "string"
         }
       ]

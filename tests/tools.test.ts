@@ -135,9 +135,9 @@ describe('tools', () => {
     applyEnv();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('WFCQ_E0023,request limit', {
+      vi.fn(async () => new Response('8011,Request quota reached', {
         status: 200,
-        headers: { 'x-webfleet-errorcode': 'WFCQ_E0023', 'x-webfleet-errormessage': 'request limit exceeded' },
+        headers: { 'x-webfleet-errorcode': '8011', 'x-webfleet-errormessage': 'Request quota reached' },
       })),
     );
     const result = await handleObjectsList({});

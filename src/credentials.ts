@@ -62,7 +62,9 @@ export function parseCredentials(input: CredentialInput): CredentialLookup {
   });
 
   if (!parsed.success) {
-    const message = parsed.error.issues.map((issue) => issue.message).join('; ');
+    const message = parsed.error.issues
+      .map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
+      .join('; ');
     return { credentials: null, error: message };
   }
 

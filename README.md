@@ -2,7 +2,7 @@
 
 Read-only [Model Context Protocol](https://modelcontextprotocol.io) server for the Bridgestone Webfleet [WEBFLEET.connect](https://www.webfleet.com/en_au/webfleet/partners/integration/developer-resources/) CSV/JSON API.
 
-Built for the Infinity Investments engagement (TFH / Rent-A-Fence, Brisbane), delivered with Steadfast. Steadfast owns the access layer and rotates credentials. This process does not keep standing client credentials. Before any production pull, confirm with the client (Scott) whether Webfleet has replaced Coretex 360 or still runs alongside it. IT Glue currently records Coretex 360, and no Webfleet tenant was documented there.
+Credentials are supplied per run (environment variables or gateway headers) by whoever owns the access layer. This process does not keep standing credentials.
 
 ## API
 
@@ -25,12 +25,12 @@ Checked against the public **WEBFLEET.connect 1.74.0** reference:
 
 Write actions (`send*`, `insert*`, `update*`, `delete*`, and the rest) are rejected.
 
-## Engagement constraints
+## Operating constraints
 
-- Read-only. Reporting questions for Webfleet are still to be captured in the Steadfast discovery session with Ben Andrews and Scott Burr.
-- Steadfast creates and rotates the API key and user. WYRE receives them per run (environment or gateway headers) and does not store them in this repository.
-- Infinity data resides in Azure Australia. State the processing region and retention before a scheduled pull leaves the tenancy.
-- Webfleet is vendor-hosted. There is no Steadfast network path to build for this API.
+- Read-only.
+- The API key and user are created and rotated outside this repository and supplied per run. They are never stored here.
+- State the processing region and retention before a scheduled pull leaves the customer's tenancy.
+- Webfleet is vendor-hosted. No private network path is needed for this API.
 
 ## Install
 
