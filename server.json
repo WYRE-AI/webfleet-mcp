@@ -1,0 +1,70 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.WYRE-AI/webfleet-mcp",
+  "title": "Webfleet",
+  "description": "Read-only MCP server for Bridgestone Webfleet (WEBFLEET.connect) fleet telematics data.",
+  "repository": {
+    "url": "https://github.com/WYRE-AI/webfleet-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/WYRE-AI/webfleet-mcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/wyre-ai/webfleet-mcp:0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WEBFLEET_ACCOUNT",
+          "description": "WEBFLEET.connect account name",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "WEBFLEET_API_KEY",
+          "description": "WEBFLEET.connect API key (exactly 36 characters)",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "WEBFLEET_USERNAME",
+          "description": "WEBFLEET.connect username (sent as HTTP Basic Auth)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "WEBFLEET_PASSWORD",
+          "description": "WEBFLEET.connect password (sent as HTTP Basic Auth)",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "WEBFLEET_HOST",
+          "description": "WEBFLEET.connect API host. Optional. Defaults to csv.webfleet.com.",
+          "isRequired": false,
+          "default": "csv.webfleet.com",
+          "format": "string"
+        },
+        {
+          "name": "WEBFLEET_LANG",
+          "description": "Response language code. Optional. Defaults to en.",
+          "isRequired": false,
+          "default": "en",
+          "format": "string"
+        },
+        {
+          "name": "MCP_TRANSPORT",
+          "description": "Transport mode for the server. Set to 'stdio' for local CLI use; the image defaults to 'http' for gateway hosting.",
+          "isRequired": false,
+          "default": "stdio",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
