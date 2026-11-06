@@ -1,0 +1,23 @@
+services:
+  webfleet-mcp:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - WEBFLEET_ACCOUNT=${WEBFLEET_ACCOUNT}
+      - WEBFLEET_API_KEY=${WEBFLEET_API_KEY}
+      - WEBFLEET_USERNAME=${WEBFLEET_USERNAME}
+      - WEBFLEET_PASSWORD=${WEBFLEET_PASSWORD}
+      - WEBFLEET_HOST=${WEBFLEET_HOST:-csv.webfleet.com}
+      - WEBFLEET_LANG=${WEBFLEET_LANG:-en}
+      - MCP_TRANSPORT=http
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET}
+      - NODE_ENV=development
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,55 @@
+{
+  "name": "@wyre-ai/webfleet-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server for the Bridgestone Webfleet WEBFLEET.connect CSV/JSON API",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "webfleet-mcp": "./dist/index.js"
+  },
+  "author": "WYRE Technology",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/WYRE-AI/webfleet-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WYRE-AI/webfleet-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/WYRE-AI/webfleet-mcp/issues"
+  },
+  "keywords": [
+    "webfleet",
+    "webfleet-connect",
+    "bridgestone",
+    "mcp",
+    "model-context-protocol",
+    "telematics",
+    "fleet"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js",
+    "start:http": "MCP_TRANSPORT=http node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@semantic-release/github": "^12.0.10",
+    "@types/node": "^22.15.0",
+    "semantic-release": "^25.0.9",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

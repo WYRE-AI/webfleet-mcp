@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Thin caller for the canonical reusable release pipeline. The build →
+# semantic-release → Docker → MCP Registry → security chain lives in the public
+# WYRE-AI/reusable-workflows repo so every *-mcp repo stays in lockstep. PR-time
+# lint/test gating is ci.yml's concern; this workflow only runs the release path.
+# Caller jobs grant the token scopes the reusable jobs request (a reusable can
+# only reduce, never expand, caller-granted scope).
+jobs:
+  release:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      security-events: write
+    uses: WYRE-AI/reusable-workflows/.github/workflows/mcp-server-release.yml@2b0b056bd7544937e5cbd56cf2e1ff8a180a411f
+    with:
+      server-name: webfleet-mcp
+      image-name: ghcr.io/wyre-ai/webfleet-mcp
+    secrets: inherit
