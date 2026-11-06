@@ -70,6 +70,8 @@ HTTP mode accepts one tenant per request. Headers are scoped with `AsyncLocalSto
 
 `/health` is container liveness and always returns 200. The MCP endpoint is `POST /mcp`. `/mcp` requires a valid `X-Gateway-S2S` header signed with `CONDUIT_S2S_SECRET`. If the secret is unset, `/mcp` rejects every request.
 
+Outside a container the listener binds to `127.0.0.1` by default (`MCP_HTTP_HOST`). The signature and tenant headers are not encrypted by this server, so any gateway-to-server hop that leaves the host or pod must run over TLS (ingress, service mesh, or a TLS-terminating proxy).
+
 ### Run
 
 ```bash
@@ -86,7 +88,7 @@ npm run start:http
 docker compose up --build
 ```
 
-The container listens on port 8080 and sets `MCP_TRANSPORT=http`.
+The container listens on `0.0.0.0:8080` and sets `MCP_TRANSPORT=http`. Expose it only on a private network behind TLS termination.
 
 ## Tests
 

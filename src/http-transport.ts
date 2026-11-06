@@ -61,7 +61,7 @@ export function createHttpRequestListener(): (req: IncomingMessage, res: ServerR
 
 export async function startHttpTransport(): Promise<void> {
   const port = parseInt(process.env.MCP_HTTP_PORT || '8080', 10);
-  const host = process.env.MCP_HTTP_HOST || '0.0.0.0';
+  const host = process.env.MCP_HTTP_HOST || '127.0.0.1';
   if (!process.env.CONDUIT_S2S_SECRET) {
     console.error('CONDUIT_S2S_SECRET is not set: /mcp will reject every request until it is configured.');
   }
