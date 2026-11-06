@@ -1,8 +1,8 @@
 /**
  * Verifies the conduit gateway's service-to-service auth header.
  * Ported from the WYRE MCP fleet (auvik-mcp / huntress-mcp). The secret is
- * opaque: an empty secret makes this return false, and the HTTP layer skips
- * the check when CONDUIT_S2S_SECRET is unset.
+ * opaque: an empty secret makes this return false, so /mcp rejects all
+ * requests when CONDUIT_S2S_SECRET is unset.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 

@@ -25,8 +25,9 @@ export function createHttpRequestListener(): (req: IncomingMessage, res: ServerR
       return;
     }
 
+    // Fail closed: with no secret configured, verifyS2sHeader rejects every request.
     const s2sSecret = process.env.CONDUIT_S2S_SECRET || '';
-    if (s2sSecret && !verifyS2sHeader(req.headers[S2S_HEADER] as string | undefined, s2sSecret)) {
+    if (!verifyS2sHeader(req.headers[S2S_HEADER] as string | undefined, s2sSecret)) {
       sendJson(res, 401, {
         error: 'Missing or invalid X-Gateway-S2S header: this endpoint only accepts requests signed by the gateway.',
       });
@@ -61,9 +62,16 @@ export function createHttpRequestListener(): (req: IncomingMessage, res: ServerR
 export async function startHttpTransport(): Promise<void> {
   const port = parseInt(process.env.MCP_HTTP_PORT || '8080', 10);
   const host = process.env.MCP_HTTP_HOST || '0.0.0.0';
+  if (!process.env.CONDUIT_S2S_SECRET) {
+    console.error('CONDUIT_S2S_SECRET is not set: /mcp will reject every request until it is configured.');
+  }
   const listener = createHttpRequestListener();
   const httpServer = createHttpServer((req, res) => {
-    void listener(req, res);
+    listener(req, res).catch((error) => {
+      console.error('Unhandled request error:', error instanceof Error ? error.message : 'unknown');
+      if (!res.headersSent) sendJson(res, 500, { error: 'Internal server error' });
+      else res.end();
+    });
   });
 
   await new Promise<void>((resolve) => {

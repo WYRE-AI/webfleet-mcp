@@ -43,6 +43,14 @@ describe('HTTP transport', () => {
     });
   });
 
+  it('rejects /mcp when the secret is unset', async () => {
+    delete process.env.CONDUIT_S2S_SECRET;
+    await withServer(async (base) => {
+      const denied = await fetch(`${base}/mcp`, { method: 'POST' });
+      expect(denied.status).toBe(401);
+    });
+  });
+
   it('requires a valid X-Gateway-S2S header when the secret is set', async () => {
     const secret = 'webfleet-s2s-test-secret';
     process.env.CONDUIT_S2S_SECRET = secret;

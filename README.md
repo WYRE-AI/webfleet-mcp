@@ -68,7 +68,7 @@ HTTP mode accepts one tenant per request. Headers are scoped with `AsyncLocalSto
 - `x-webfleet-host` (optional)
 - `x-webfleet-lang` (optional)
 
-`/health` is container liveness and always returns 200. The MCP endpoint is `POST /mcp`. When `CONDUIT_S2S_SECRET` is set, `/mcp` requires a valid `X-Gateway-S2S` header.
+`/health` is container liveness and always returns 200. The MCP endpoint is `POST /mcp`. `/mcp` requires a valid `X-Gateway-S2S` header signed with `CONDUIT_S2S_SECRET`. If the secret is unset, `/mcp` rejects every request.
 
 ### Run
 

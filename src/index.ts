@@ -2,7 +2,15 @@ import { config } from 'dotenv';
 import { startHttpTransport } from './http-transport.js';
 import { startStdioTransport } from './stdio-transport.js';
 
-config();
+// stdout carries JSON-RPC in stdio mode. dotenv logs with console.log and
+// DOTENV_CONFIG_DEBUG/QUIET override options, so route its output to stderr.
+const stdoutLog = console.log;
+console.log = console.error;
+try {
+  config({ quiet: true });
+} finally {
+  console.log = stdoutLog;
+}
 
 const transport = process.env.MCP_TRANSPORT || (process.argv.includes('--http') ? 'http' : 'stdio');
 

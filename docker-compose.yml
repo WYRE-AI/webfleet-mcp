@@ -11,6 +11,7 @@ services:
       - WEBFLEET_HOST=${WEBFLEET_HOST:-csv.webfleet.com}
       - WEBFLEET_LANG=${WEBFLEET_LANG:-en}
       - MCP_TRANSPORT=http
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET}
       - NODE_ENV=development
     env_file:
       - .env
