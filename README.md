@@ -8,7 +8,7 @@ Every tool is a `GET` of a read-only report action against the fixed endpoint `h
 
 | Tool | WEBFLEET.connect action | Limit |
 | --- | --- | --- |
-| `webfleet_status` | none (local configuration only) | n/a |
+| `webfleet_status` | none (local configuration only; a tool error when credentials are missing or invalid) | n/a |
 | `webfleet_objects_list` | `showObjectReportExtern` | 6/min |
 | `webfleet_vehicles_list` | `showVehicleReportExtern` | 10/min |
 | `webfleet_object_groups_list` | `showObjectGroups` | 10/min |

@@ -66,13 +66,28 @@ describe('tool tiers', () => {
     process.env.WEBFLEET_ACCOUNT = 'acct';
     process.env.WEBFLEET_USERNAME = 'user';
     process.env.WEBFLEET_PASSWORD = 'status-password-secret';
-    process.env.WEBFLEET_API_KEY = 'short';
+    process.env.WEBFLEET_API_KEY = 'k'.repeat(36);
     try {
       const text = textOf(await buildToolset(parseToolTiers(undefined)).dispatch('webfleet_status', {}));
       const body = JSON.parse(text);
-      expect(body).toMatchObject({ server: 'webfleet-mcp', baseUrl: 'https://csv.webfleet.com/extern', credentials: { usable: false } });
-      expect(body.credentials.problem).toMatch(/36 characters/);
+      expect(body).toMatchObject({ server: 'webfleet-mcp', baseUrl: 'https://csv.webfleet.com/extern', credentials: { usable: true } });
       expect(text).not.toContain('status-password-secret');
+      expect(text).not.toContain('k'.repeat(36));
+    } finally {
+      for (const k of ['WEBFLEET_ACCOUNT', 'WEBFLEET_USERNAME', 'WEBFLEET_PASSWORD', 'WEBFLEET_API_KEY']) delete process.env[k];
+    }
+  });
+
+  it('the status tool returns isError when credentials are invalid, without leaking them', async () => {
+    process.env.WEBFLEET_ACCOUNT = 'acct';
+    process.env.WEBFLEET_USERNAME = 'user';
+    process.env.WEBFLEET_PASSWORD = 'status-password-secret';
+    process.env.WEBFLEET_API_KEY = 'short';
+    try {
+      const result = await buildToolset(parseToolTiers(undefined)).dispatch('webfleet_status', {});
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toMatch(/36 characters/);
+      expect(textOf(result)).not.toContain('status-password-secret');
     } finally {
       for (const k of ['WEBFLEET_ACCOUNT', 'WEBFLEET_USERNAME', 'WEBFLEET_PASSWORD', 'WEBFLEET_API_KEY']) delete process.env[k];
     }

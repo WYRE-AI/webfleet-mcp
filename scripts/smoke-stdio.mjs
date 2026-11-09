@@ -74,8 +74,8 @@ try {
   if (!tools.every((t) => t.annotations?.readOnlyHint === true && t.annotations?.destructiveHint === false)) fail('a tool is not annotated read-only');
 
   const status = await client.callTool({ name: 'webfleet_status', arguments: {} });
-  if (status.isError || !/csv\.webfleet\.com\/extern/.test(text(status))) fail(`status failed: ${text(status).slice(0, 200)}`);
-  if (text(status).includes(PASSWORD)) fail('password leaked into status output');
+  if (!status.isError || !/exactly 36 characters/.test(text(status))) fail(`status did not report the malformed API key: ${text(status).slice(0, 200)}`);
+  if (text(status).includes(BAD_API_KEY) || text(status).includes(PASSWORD)) fail('credential leaked into status output');
 
   const refused = await client.callTool({ name: 'webfleet_object_groups_list', arguments: {} });
   if (!refused.isError || !/exactly 36 characters/.test(text(refused))) fail(`malformed API key was not refused: ${text(refused).slice(0, 200)}`);
