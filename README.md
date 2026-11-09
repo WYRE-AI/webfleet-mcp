@@ -41,7 +41,7 @@ Every tool is a `GET` of a read-only report action against the fixed endpoint `h
 
 The catalog is one table in [`src/tools/catalog.ts`](src/tools/catalog.ts); the action allowlist and limits are in [`src/actions.ts`](src/actions.ts).
 
-**Date ranges.** Report tools take the reference's date range filter: `range_pattern` (`d0`, `d-1`..`d-6`, `w0`..`w-3`, `wf0`..`wf-3`, `m0`..`m-3`, `ud`), or `rangefrom_string` + `rangeto_string` (ISO 8601, since every request sends `useISO8601=true`), or `year` (+ `month`, `day`). Trips and the logbook also accept `tripid` alone (continuous replication) and orders accept `orderid` alone.
+**Date ranges.** Report tools take the reference's date range filter: `range_pattern` (`d0`, `d-1`..`d-6`, `w0`..`w-3`, `wf0`..`wf-3`, `m0`..`m-3`, `ud`), or `rangefrom_string` + `rangeto_string` (ISO 8601, since every request sends `useISO8601=true`), or `year` (+ `month`, `day`). An explicit `rangefrom_string` + `rangeto_string` range is always sent with `range_pattern=ud`, as in the reference's example. `webfleet_standstills` requires `range_pattern` and does not take `year`/`month`/`day`. Trips accept `tripid` alone (continuous replication), the logbook accepts `tripid` alone (one trip), and orders accept `orderid` alone.
 
 **No paging.** WEBFLEET.connect returns a full list per call and has no page parameter. `tripid` is passed through as given; the server never issues follow-up requests. Use `columnfilter` (every tool) and the filters to keep responses small. A response larger than `WEBFLEET_MAX_RESPONSE_CHARS` keeps as many leading rows as fit and adds `truncated`, `returned_items`, `total_items`, and a `truncation_hint`.
 
@@ -51,11 +51,11 @@ The catalog is one table in [`src/tools/catalog.ts`](src/tools/catalog.ts); the 
 
 Webfleet blocks an action once its limit is exceeded and keeps blocking until no request arrives for a full window; repeated overload can get a client's limits lowered or its access revoked. This server therefore:
 
-- **throttles** each action per account and per API key to its documented limit and refuses locally (`Not sent: ... Retry in Ns`) instead of sending a request that would be rejected;
-- **serialises** requests per account and username, as the reference requires (error 8015 otherwise);
+- **throttles** each action per exact credential set and per API key to its documented limit and refuses locally (`Not sent: ... Retry in Ns`) instead of sending a request that would be rejected. There is deliberately no bucket keyed on the account name alone: a slot is spent before Webfleet checks the password, so one would let anyone who guesses an account name lock its owner out. Two connections to the same account with different usernames or API keys therefore each get the full budget;
+- **serialises** requests per exact credential set, which covers the reference's per account/username rule (error 8015 otherwise);
 - **caches** successful responses per exact credential set and request for one limit interval (60 s for a 1/min action, 10 s for 6/min, 6 s for 10/min), so a repeated identical call is answered locally.
 
-The state is per process. With more than one replica, each replica keeps its own budget; run one replica per gateway cell or lower the limits.
+The state is per process and bounded (expired throttle keys are swept, both maps are capped, and each cache entry is charged at least 1 KiB). With more than one replica, each replica keeps its own budget; run one replica per gateway cell or lower the limits.
 
 ## Authentication
 

@@ -7,8 +7,10 @@
  * - integers are range-checked (out of range is an error, not a cap);
  * - `list` params go on the wire comma-separated, the reference's form for
  *   multi-value parameters (e.g. kpinames=tripstats,orders);
- * - `trueOnly` booleans (ungroupedonly) are sent only as `true`;
- * - the shared date range filter is validated per the reference's rules;
+ * - `trueOnly` booleans (ungroupedonly) are sent only as `true`; `numeric`
+ *   booleans go out as 1/0;
+ * - the shared date range filter is validated per the reference's rules, and
+ *   an explicit from/to range is sent with range_pattern=ud;
  * - `columnfilter` (a general parameter) is offered on every tool.
  * WEBFLEET.connect has no paging; `tripid` (continuous replication) is passed
  * through as given and the server never issues follow-up requests.
@@ -23,9 +25,10 @@ export const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint:
 
 type Common = { description: string; required?: boolean };
 
-export type StringParam = Common & { type: 'string'; maxLength?: number; enum?: readonly string[]; pattern?: RegExp; patternHint?: string };
+export type StringParam = Common & { type: 'string'; maxLength?: number; maxBytes?: number; enum?: readonly string[]; pattern?: RegExp; patternHint?: string };
 export type IntegerParam = Common & { type: 'integer'; minimum: number; maximum?: number; enum?: readonly number[] };
-export type BooleanParam = Common & { type: 'boolean'; trueOnly?: boolean };
+/** `numeric`: sent as 1/0, for parameters the reference types boolean but documents as 0/1. */
+export type BooleanParam = Common & { type: 'boolean'; trueOnly?: boolean; numeric?: boolean };
 export type ListParam = Common & { type: 'list'; enum: readonly string[] };
 export type Param = StringParam | IntegerParam | BooleanParam | ListParam;
 
@@ -34,8 +37,11 @@ export interface Endpoint {
   action: Action;
   description: string;
   params?: Record<string, Param>;
-  /** Adds the shared date range filter parameters. */
-  dateRange?: 'required' | 'optional';
+  /**
+   * Adds the shared date range filter parameters. 'pattern' is required and
+   * leaves out year/month/day, for actions that require range_pattern.
+   */
+  dateRange?: 'required' | 'optional' | 'pattern';
   /** With dateRange 'required': the date range may be omitted when this parameter is given. */
   dateRangeUnless?: string;
   /** At least one alternative must be fully present, e.g. [['objectno'], ['objectuid']]. */
@@ -48,7 +54,7 @@ const MAX_STRING = 1000;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
 /** ISO 8601 date-time as the reference prefers it (useISO8601=true is always sent). */
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}([.,]\d{1,9})?)?(Z|[+-]\d{2}(:?\d{2})?)?$/;
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([.,]\d{1,9})?(Z|[+-]\d{2}:\d{2})?$/;
 
 export const RANGE_PATTERNS = [
   'd0', 'd-1', 'd-2', 'd-3', 'd-4', 'd-5', 'd-6',
@@ -74,7 +80,7 @@ const DATE_RANGE_PARAMS: Record<string, Param> = {
     description:
       'Relative date range: d0 today, d-1..d-6 days ago, w0 current week, w-1..w-3 weeks ago, wf0..wf-3 floating 7-day weeks, m0 current month, m-1..m-3 months ago, ud user-defined (needs rangefrom_string and rangeto_string).',
   },
-  rangefrom_string: iso('Start of the date range. Use with rangeto_string (alone, or with range_pattern=ud).'),
+  rangefrom_string: iso('Start of the date range. Use with rangeto_string; range_pattern=ud is sent with them.'),
   rangeto_string: iso('End of the date range. Use with rangefrom_string.'),
   year: { type: 'integer', minimum: 1970, maximum: 2100, description: 'Whole calendar year. Alternative to range_pattern and rangefrom_string/rangeto_string.' },
   month: { type: 'integer', minimum: 1, maximum: 12, description: 'Whole month (1-12). Requires year.' },
@@ -109,6 +115,7 @@ function checkString(value: unknown, key: string, p: StringParam): string {
   const s = value.trim();
   const max = p.maxLength ?? MAX_STRING;
   if (s.length > max) throw new ArgumentError(`"${key}" is too long (max ${max} characters).`);
+  if (p.maxBytes && Buffer.byteLength(s, 'utf8') > p.maxBytes) throw new ArgumentError(`"${key}" is too long (max ${p.maxBytes} bytes in UTF-8).`);
   if (CONTROL.test(s)) throw new ArgumentError(`"${key}" contains control characters.`);
   if (p.enum && !p.enum.includes(s)) throw new ArgumentError(`"${key}" must be one of: ${p.enum.join(', ')}.`);
   if (p.pattern && !p.pattern.test(s)) throw new ArgumentError(`"${key}" must be ${p.patternHint ?? 'well-formed'}.`);
@@ -131,7 +138,7 @@ function queryValue(key: string, p: Param, value: unknown): QueryValue | undefin
     case 'boolean':
       if (typeof value !== 'boolean') throw new ArgumentError(`"${key}" must be true or false.`);
       if (p.trueOnly) return value ? 'true' : undefined;
-      return value;
+      return p.numeric ? Number(value) : value;
     case 'list': {
       if (!Array.isArray(value) || value.length === 0) throw new ArgumentError(`"${key}" must be a non-empty array.`);
       const items = value.map((item, i) => checkString(typeof item === 'number' ? String(item) : item, `${key}[${i}]`, { type: 'string', description: '', enum: p.enum }));
@@ -142,7 +149,7 @@ function queryValue(key: string, p: Param, value: unknown): QueryValue | undefin
 
 const present = (args: ToolArgs, key: string) => args[key] !== undefined && args[key] !== null && args[key] !== '';
 
-function checkDateRange(args: ToolArgs, required: boolean, unless?: string): void {
+function checkDateRange(args: ToolArgs, mode: NonNullable<Endpoint['dateRange']>, unless?: string): void {
   const has = (k: string) => present(args, k);
   const pattern = args.range_pattern;
   if (has('rangefrom_string') !== has('rangeto_string')) throw new ArgumentError('rangefrom_string and rangeto_string must be given together.');
@@ -155,17 +162,17 @@ function checkDateRange(args: ToolArgs, required: boolean, unless?: string): voi
   if (has('year') && (has('range_pattern') || has('rangefrom_string'))) {
     throw new ArgumentError('year/month/day replace range_pattern and rangefrom_string/rangeto_string; give only one form.');
   }
-  if (required && !has('range_pattern') && !has('rangefrom_string') && !has('year') && !(unless && has(unless))) {
-    throw new ArgumentError(
-      `A date range is required: range_pattern, rangefrom_string + rangeto_string, or year (+ month, day)${unless ? `, unless ${unless} is given` : ''}.`,
-    );
+  if (mode !== 'optional' && !has('range_pattern') && !has('rangefrom_string') && !has('year') && !(unless && has(unless))) {
+    const forms = mode === 'pattern' ? 'range_pattern or rangefrom_string + rangeto_string' : 'range_pattern, rangefrom_string + rangeto_string, or year (+ month, day)';
+    throw new ArgumentError(`A date range is required: ${forms}${unless ? `, unless ${unless} is given` : ''}.`);
   }
 }
 
 export function endpointTool(spec: Endpoint): ToolDef {
+  const { year, month, day, ...patternRange } = DATE_RANGE_PARAMS;
   const params: Record<string, Param> = {
     ...(spec.params ?? {}),
-    ...(spec.dateRange ? DATE_RANGE_PARAMS : {}),
+    ...(spec.dateRange === 'pattern' ? patternRange : spec.dateRange ? { ...patternRange, year, month, day } : {}),
     columnfilter: COLUMN_FILTER,
   };
   for (const alternative of spec.requireOneOf ?? []) {
@@ -180,6 +187,7 @@ export function endpointTool(spec: Endpoint): ToolDef {
   const notes = [
     `Read-only: WEBFLEET.connect ${spec.action} (limit ${describeLimit(spec.action)}; calls over the limit are refused locally, and an identical call inside the limit interval is answered from a short cache).`,
     spec.dateRange === 'required' ? `Requires a date range${spec.dateRangeUnless ? ` unless ${spec.dateRangeUnless} is given` : ''}.` : '',
+    spec.dateRange === 'pattern' ? 'Requires range_pattern or rangefrom_string + rangeto_string (year/month/day are not accepted).' : '',
     spec.requireOneOf ? `Requires ${spec.requireOneOf.map((alt) => alt.join(' + ')).join(' or ')}.` : '',
   ].filter(Boolean);
 
@@ -193,8 +201,10 @@ export function endpointTool(spec: Endpoint): ToolDef {
   return {
     tier: 'read',
     tool,
-    handler: (args: ToolArgs) => {
-      if (spec.dateRange) checkDateRange(args, spec.dateRange === 'required', spec.dateRangeUnless);
+    handler: (input: ToolArgs) => {
+      if (spec.dateRange) checkDateRange(input, spec.dateRange, spec.dateRangeUnless);
+      // The reference's explicit-range example always pairs from/to with range_pattern=ud.
+      const args = spec.dateRange && present(input, 'rangefrom_string') && !present(input, 'range_pattern') ? { ...input, range_pattern: 'ud' } : input;
       if (spec.requireOneOf && !spec.requireOneOf.some((alt) => alt.every((k) => present(args, k)))) {
         throw new ArgumentError(`${spec.name} requires ${spec.requireOneOf.map((alt) => alt.join(' + ')).join(' or ')}.`);
       }

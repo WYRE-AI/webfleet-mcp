@@ -29,11 +29,13 @@ const tripid: Param = {
   patternHint: 'a non-negative integer',
   description: 'Highest tripid already processed (continuous replication): returns newer records only. Passed through as given; the server never pages.',
 };
-const orderid: Param = { type: 'string', maxLength: 20, description: 'Account-unique order id (case-sensitive, max 20 bytes).' };
+const orderid: Param = { type: 'string', maxLength: 20, maxBytes: 20, description: 'Account-unique order id (case-sensitive, max 20 bytes in UTF-8).' };
 const KPI_NAMES = ['tripstats', 'ecostats', 'optidrive', 'speedingevents', 'drivingevents', 'orders'] as const;
 const kpinames: Param = { type: 'list', enum: KPI_NAMES, required: true, description: 'KPI groups to return (sent comma-separated).' };
 const kpiLevel: Param = { type: 'string', enum: ['day', 'month', 'range'], description: 'Aggregation: day, month, or range (one KPI for the whole range; default).' };
 const OBJECT = [['objectno'], ['objectuid']] as const;
+/** "One of the following parameters is mandatory" (showSpeedingEvents, showAccelerationEvents). */
+const OBJECT_OR_DRIVER = [['objectno'], ['objectuid'], ['objectgroupname'], ['driverno'], ['driveruid'], ['drivergroupname']] as const;
 
 const OBJECT_FEATURES = [
   'linkconnect', 'hdtracking', 'waypoints', 'tachodownload', 'drivingtime', 'plugins', 'orderscheduleoptimization',
@@ -103,7 +105,7 @@ const ENDPOINTS: Endpoint[] = [
     name: 'webfleet_trips',
     action: 'showTripReportExtern',
     description:
-      'List trips. Use tripid for continuous replication (records newer than that id, at most 10000 per call) or a date range, which applies to the trip end time.',
+      'List trips. Use tripid for continuous replication (records newer than that id, at most 10000 per call) or a date range, which applies to the trip end time. A range of more than 1 month requires objectno, and the range may not exceed 1 year. Poll at most every 15 minutes.',
     params: { objectno, objectuid, objectgroupname, driverno, driveruid, drivergroupname, tripid },
     dateRange: 'required',
     dateRangeUnless: 'tripid',
@@ -128,7 +130,12 @@ const ENDPOINTS: Endpoint[] = [
     name: 'webfleet_logbook',
     action: 'showLogbook',
     description: 'Logbook entries (trips with their logbook classification). The date range (max one year) applies to the trip end time.',
-    params: { objectno, objectuid, tripid, modified_since: iso('Only trips manually edited after this time.') },
+    params: {
+      objectno,
+      objectuid,
+      tripid: { ...tripid, description: 'Id of one finished trip; takes precedence over objectno, and the date range may be omitted when given.' },
+      modified_since: iso('Only trips manually edited after this time.'),
+    },
     dateRange: 'required',
     dateRangeUnless: 'tripid',
   },
@@ -137,19 +144,20 @@ const ENDPOINTS: Endpoint[] = [
     action: 'showStandStills',
     description: 'Standstill periods per object.',
     params: { objectno, objectuid },
-    dateRange: 'required',
+    dateRange: 'pattern',
   },
   {
     name: 'webfleet_idle_exceptions',
     action: 'showIdleExceptions',
-    description: 'Idling exceptions per object or driver.',
+    description:
+      'Idling exceptions per object or driver. The range may not exceed 1 day without an object or with an object group, or 1 month with an object, and may not start more than 90 days back.',
     params: { objectno, objectuid, objectgroupname, driverno, driveruid, drivergroupname },
     dateRange: 'required',
   },
   {
     name: 'webfleet_working_times',
     action: 'showWorkingTimes',
-    description: 'Driver working time intervals.',
+    description: 'Driver working time intervals. The date range may cover at most 1 month.',
     params: {
       driverno,
       driveruid,
@@ -184,8 +192,8 @@ const ENDPOINTS: Endpoint[] = [
         enum: [0, 1, 2, 3, 4, 5],
         description: 'Event level: 0 message, 1 notice, 2 warning, 3 alarm 1, 4 alarm 2, 5 alarm 3.',
       },
-      resolved: { type: 'boolean', description: 'Only resolved (true) or unresolved (false) events.' },
-      acknowledged: { type: 'boolean', description: 'Only acknowledged (true) or unacknowledged (false) events.' },
+      resolved: { type: 'boolean', numeric: true, description: 'Only resolved (true) or unresolved (false) events. Sent as 1/0.' },
+      acknowledged: { type: 'boolean', numeric: true, description: 'Only acknowledged (true) or unacknowledged (false) events. Sent as 1/0.' },
     },
     dateRange: 'required',
   },
@@ -195,6 +203,7 @@ const ENDPOINTS: Endpoint[] = [
     description: 'Speeding events per object or driver.',
     params: { objectno, objectuid, driverno, driveruid, objectgroupname, drivergroupname },
     dateRange: 'required',
+    requireOneOf: OBJECT_OR_DRIVER,
   },
   {
     name: 'webfleet_acceleration_events',
@@ -203,6 +212,7 @@ const ENDPOINTS: Endpoint[] = [
     params: {
       objectno,
       objectuid,
+      objectgroupname,
       driverno,
       driveruid,
       drivergroupname,
@@ -214,6 +224,7 @@ const ENDPOINTS: Endpoint[] = [
       },
     },
     dateRange: 'required',
+    requireOneOf: OBJECT_OR_DRIVER,
   },
 
   // Drivers

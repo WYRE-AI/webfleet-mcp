@@ -59,7 +59,7 @@ const ROWS: Row[] = [
     tool: 'webfleet_events',
     args: { objectno: '001', eventlevel_cur: 3, resolved: false, acknowledged: true, ...UD },
     action: 'showEventReportExtern',
-    params: [['objectno', '001'], ['eventlevel_cur', '3'], ['resolved', 'false'], ['acknowledged', 'true'], ...UD_WIRE],
+    params: [['objectno', '001'], ['eventlevel_cur', '3'], ['resolved', '0'], ['acknowledged', '1'], ...UD_WIRE],
   },
   { tool: 'webfleet_speeding_events', args: { driveruid: 'du-1', range_pattern: 'wf0' }, action: 'showSpeedingEvents', params: [['driveruid', 'du-1'], ['range_pattern', 'wf0']] },
   {
@@ -142,6 +142,13 @@ describe('argument validation (no request is sent)', () => {
     ['webfleet_nearest_vehicles', { latitude: 51364460 }, /requires addrno or latitude \+ longitude/],
     ['webfleet_nearest_vehicles', { latitude: 91_000_000, longitude: 0 }, /between/],
     ['webfleet_working_times', { range_pattern: 'd0' }, /requires driverno or driveruid/],
+    ['webfleet_speeding_events', { range_pattern: 'd0' }, /requires objectno or objectuid or objectgroupname or driverno or driveruid or drivergroupname/],
+    ['webfleet_acceleration_events', { range_pattern: 'd0' }, /requires objectno or objectuid or objectgroupname or driverno or driveruid or drivergroupname/],
+    ['webfleet_standstills', { objectno: '001', year: 2026 }, /date range is required: range_pattern or rangefrom_string/],
+    ['webfleet_trips', { rangefrom_string: '2026-11-01T00:00', rangeto_string: T1 }, /ISO 8601/],
+    ['webfleet_trips', { rangefrom_string: '2026-11-01T00:00:00+0100', rangeto_string: T1 }, /ISO 8601/],
+    ['webfleet_trips', { rangefrom_string: '2026-11-01T00:00:00+01', rangeto_string: T1 }, /ISO 8601/],
+    ['webfleet_order_waypoints', { orderid: '\u00e9'.repeat(11) }, /too long \(max 20 bytes/],
     ['webfleet_events', { range_pattern: 'd0', eventlevel_cur: 9 }, /must be one of: 0, 1, 2, 3, 4, 5/],
     ['webfleet_object_kpis', { range_pattern: 'd0' }, /"kpinames" is required/],
     ['webfleet_object_kpis', { range_pattern: 'd0', kpinames: ['everything'] }, /must be one of/],
@@ -170,6 +177,26 @@ describe('argument validation (no request is sent)', () => {
     expect(JSON.parse(textOf(res))).toEqual([{ tripid: 1000001 }, { tripid: 1000002 }]);
   });
 
+  it('sends range_pattern=ud with an explicit from/to range, as the reference example does', async () => {
+    const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
+    const res = await getDefaultToolset().dispatch('webfleet_trips', { rangefrom_string: T0, rangeto_string: T1 });
+    expect(res.isError, textOf(res)).toBeFalsy();
+    expect(actionParams(calls[0].url)).toEqual(UD_WIRE);
+  });
+
+  it('accepts ISO 8601 with fractional seconds and a +hh:mm offset', async () => {
+    mockWebfleet([always(() => jsonResponse([]))]);
+    const res = await getDefaultToolset().dispatch('webfleet_trips', { rangefrom_string: '2007-02-02T12:12:12.500+01:00', rangeto_string: T1 });
+    expect(res.isError, textOf(res)).toBeFalsy();
+  });
+
+  it('acceleration events can filter by objectgroupname alone', async () => {
+    const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
+    const res = await getDefaultToolset().dispatch('webfleet_acceleration_events', { objectgroupname: 'North', range_pattern: 'd0' });
+    expect(res.isError, textOf(res)).toBeFalsy();
+    expect(actionParams(calls[0].url)).toEqual([['objectgroupname', 'North'], ['range_pattern', 'd0']]);
+  });
+
   it('accepts orderid instead of a date range for orders', async () => {
     mockWebfleet([always(() => jsonResponse([]))]);
     const res = await getDefaultToolset().dispatch('webfleet_orders_list', { orderid: 'ord-1' });
@@ -182,5 +209,26 @@ describe('argument validation (no request is sent)', () => {
     expect(calls[0].url.origin).toBe('https://csv.webfleet.com');
     expect(actionParams(calls[0].url)).toEqual([]);
     expect(calls[0].url.searchParams.get('account')).toBe('wfc-test-account');
+  });
+});
+
+describe('tool descriptions carry the documented restrictions', () => {
+  const describe_ = (name: string) => {
+    const tool = getDefaultToolset().tools.find((t) => t.name === name)!;
+    return { text: tool.description ?? '', props: tool.inputSchema.properties as Record<string, { description?: string }> };
+  };
+
+  it('webfleet_logbook tripid selects one trip, not a replication high-water mark', () => {
+    const { props } = describe_('webfleet_logbook');
+    expect(props.tripid.description).toMatch(/one finished trip/);
+    expect(props.tripid.description).not.toMatch(/newer/);
+  });
+
+  it.each([
+    ['webfleet_trips', /more than 1 month requires objectno.*1 year.*15 minutes/],
+    ['webfleet_idle_exceptions', /1 day.*1 month.*90 days/],
+    ['webfleet_working_times', /at most 1 month/],
+  ])('%s states its date range limits', (name, limits) => {
+    expect(describe_(name).text).toMatch(limits);
   });
 });
