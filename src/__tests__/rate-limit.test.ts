@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWithCredentials } from '../client.js';
 import { lockGatewayMode, resetGatewayLock } from '../config.js';
-import { cacheGet, cacheSet, MAX_CACHE_TOTAL_CHARS, MAX_SLOT_KEYS, MIN_CACHE_ENTRY_CHARS, rateLimitSizes, takeSlot } from '../rate-limit.js';
+import { cacheGet, cacheSet, heldFor, holdOff, MAX_CACHE_TOTAL_CHARS, MAX_SLOT_KEYS, MIN_CACHE_ENTRY_CHARS, rateLimitSizes, takeSlot } from '../rate-limit.js';
 import { getDefaultToolset } from '../tools/index.js';
 import { always, basicOf, clearEnvCredentials, CREDS, jsonResponse, mockWebfleet, setEnvCredentials, textOf, webfleetError } from './helpers.js';
 
@@ -69,13 +69,24 @@ describe('per-account throttle (documented request limits)', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('a shared API key is throttled across accounts too (the reference does not say which one Webfleet counts)', async () => {
+  it('a shared API key is never a shared budget: each account keeps its own (a partner key spans many tenants)', async () => {
     lockGatewayMode();
     clearEnvCredentials();
     const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
     expect((await runWithCredentials({ ...CREDS, account: 'tenant-a' }, () => trips('d-1'))).isError).toBeFalsy();
     const res = await runWithCredentials({ ...CREDS, account: 'tenant-b' }, () => trips('d-2'));
+    expect(res.isError, textOf(res)).toBeFalsy();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('users of one account share its budget (Webfleet counts the limit per account, not per user)', async () => {
+    lockGatewayMode();
+    clearEnvCredentials();
+    const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
+    expect((await runWithCredentials(CREDS, () => trips('d-1'))).isError).toBeFalsy();
+    const res = await runWithCredentials({ ...CREDS, username: 'second-user', password: 'second-password-not-real' }, () => trips('d-2'));
     expect(res.isError).toBe(true);
+    expect(textOf(res)).toMatch(/Not sent/);
     expect(calls).toHaveLength(1);
   });
 
@@ -176,6 +187,15 @@ describe('bounded state (keys come from caller input)', () => {
     expect(rateLimitSizes().slotKeys).toBeLessThanOrEqual(MAX_SLOT_KEYS);
   });
 
+  it('timeout holds expire and are capped', () => {
+    holdOff('h', 10_000, 0);
+    expect(heldFor('h', 9_000)).toBe(1_000);
+    expect(heldFor('h', 10_000)).toBe(0);
+    for (let i = 0; i < MAX_SLOT_KEYS + 10; i++) holdOff(`h-${i}`, 10_000, 0);
+    expect(heldFor('h-0', 1)).toBe(0);
+    expect(heldFor(`h-${MAX_SLOT_KEYS + 9}`, 1)).toBe(9_999);
+  });
+
   it('tiny cached bodies (empty results) are charged a minimum size, so the entry count is capped', () => {
     for (let i = 0; i < 20_000; i++) cacheSet(`e-${i}`, [], 2, 60_000, 0);
     expect(rateLimitSizes().cacheEntries).toBeLessThanOrEqual(MAX_CACHE_TOTAL_CHARS / MIN_CACHE_ENTRY_CHARS);
@@ -185,6 +205,58 @@ describe('bounded state (keys come from caller input)', () => {
     for (let i = 0; i < 10; i++) cacheSet(`x-${i}`, i, 10, 1_000, 0);
     cacheSet('fresh', 1, 10, 1_000, 61_000);
     expect(rateLimitSizes().cacheEntries).toBe(1);
+  });
+});
+
+describe('back-off after a timeout (the request may still be running at Webfleet: error 8015)', () => {
+  /** A Webfleet that never answers: the request only ends when its signal aborts. */
+  function hangingWebfleet() {
+    const fetchMock = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    process.env.WEBFLEET_REQUEST_TIMEOUT_MS = '20';
+  });
+  afterEach(() => {
+    delete process.env.WEBFLEET_REQUEST_TIMEOUT_MS;
+  });
+
+  it('refuses the next call for these credentials for 10s, then sends again', async () => {
+    const hanging = hangingWebfleet();
+    const timedOut = await getDefaultToolset().dispatch('webfleet_object_groups_list', {});
+    expect(timedOut.isError).toBe(true);
+    expect(textOf(timedOut)).toMatch(/timed out/);
+
+    now += 1_000;
+    const refused = await getDefaultToolset().dispatch('webfleet_driver_groups_list', {});
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toMatch(/Not sent: the previous WEBFLEET\.connect request for these credentials timed out.*Retry in 9s/);
+    expect(hanging).toHaveBeenCalledTimes(1);
+
+    now += 9_000;
+    const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
+    const sent = await getDefaultToolset().dispatch('webfleet_driver_groups_list', {});
+    expect(sent.isError, textOf(sent)).toBeFalsy();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not hold back another tenant', async () => {
+    lockGatewayMode();
+    clearEnvCredentials();
+    hangingWebfleet();
+    expect((await runWithCredentials(CREDS, () => getDefaultToolset().dispatch('webfleet_object_groups_list', {}))).isError).toBe(true);
+    const { calls } = mockWebfleet([always(() => jsonResponse([]))]);
+    const other = { ...CREDS, account: 'tenant-b', apiKey: 'tenant-b-apikey-not-real-00000000000' };
+    const res = await runWithCredentials(other, () => getDefaultToolset().dispatch('webfleet_object_groups_list', {}));
+    expect(res.isError, textOf(res)).toBeFalsy();
+    expect(calls).toHaveLength(1);
   });
 });
 

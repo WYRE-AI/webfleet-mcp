@@ -225,6 +225,19 @@ describe('error mapping', () => {
     expect(textOf(res)).toMatch(/could not reach/i);
   });
 
+  it('keeps a safe system error code from the network failure cause', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }); }));
+    const res = await getDefaultToolset().dispatch(GROUPS, {});
+    expect(textOf(res)).toMatch(/could not reach WEBFLEET\.connect \(network error, ENOTFOUND\)/i);
+  });
+
+  it('drops a cause code that is not a plain system error code', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed', { cause: { code: `bad ${FAKE_PASSWORD}` } }); }));
+    const res = await getDefaultToolset().dispatch(GROUPS, {});
+    expect(textOf(res)).toMatch(/\(network error\)/);
+    expect(textOf(res)).not.toContain(FAKE_PASSWORD);
+  });
+
   it('refuses a non-JSON success body', async () => {
     mockWebfleet([always(() => new Response('"objectno";"objectname"\n"1";"Van"', { status: 200 }))]);
     const res = await getDefaultToolset().dispatch(GROUPS, {});

@@ -51,11 +51,12 @@ The catalog is one table in [`src/tools/catalog.ts`](src/tools/catalog.ts); the 
 
 Webfleet blocks an action once its limit is exceeded and keeps blocking until no request arrives for a full window; repeated overload can get a client's limits lowered or its access revoked. This server therefore:
 
-- **throttles** each action per exact credential set and per API key to its documented limit and refuses locally (`Not sent: ... Retry in Ns`) instead of sending a request that would be rejected. There is deliberately no bucket keyed on the account name alone: a slot is spent before Webfleet checks the password, so one would let anyone who guesses an account name lock its owner out. Two connections to the same account with different usernames or API keys therefore each get the full budget;
+- **throttles** each action per tenant account and its API key to its documented limit and refuses locally (`Not sent: ... Retry in Ns`) instead of sending a request that would be rejected. Users of one account share its budget. A budget is never shared across accounts, even when they use the same (partner) API key, and never keyed on the account name alone: a slot is spent before Webfleet checks credentials, so such a bucket would let anyone who guesses an account name lock its owner out;
 - **serialises** requests per exact credential set, which covers the reference's per account/username rule (error 8015 otherwise);
+- **backs off** for 10 s after a request times out or is cancelled: Webfleet may still be running it and would answer the next request for that user with 8015, so the next call for the same credentials is refused locally until then;
 - **caches** successful responses per exact credential set and request for one limit interval (60 s for a 1/min action, 10 s for 6/min, 6 s for 10/min), so a repeated identical call is answered locally.
 
-The state is per process and bounded (expired throttle keys are swept, both maps are capped, and each cache entry is charged at least 1 KiB). With more than one replica, each replica keeps its own budget; run one replica per gateway cell or lower the limits.
+The state is per process and bounded (expired throttle keys and back-off holds are swept, every map is capped, and each cache entry is charged at least 1 KiB). With more than one replica, each replica keeps its own budget; run one replica per gateway cell or lower the limits.
 
 ## Authentication
 
@@ -88,7 +89,7 @@ All tools are tier `read`, and `read` is the default (`WEBFLEET_TOOL_TIERS=read`
 | `MCP_ALLOWED_HOSTS` | unset | Optional `Host` header allowlist for `/mcp`. |
 | `CONDUIT_S2S_SECRET` | unset | Required for HTTP. 32+ characters, not a placeholder (`openssl rand -hex 32`). Never logged. |
 | `MCP_ALLOW_INSECURE_DEV` | unset | `1` = local development without S2S; binds 127.0.0.1 only. |
-| `WEBFLEET_REQUEST_TIMEOUT_MS` | `60000` | Upstream timeout (max 300000, the reference's recommendation). Aborting early makes the next call for the same user fail with 8015. |
+| `WEBFLEET_REQUEST_TIMEOUT_MS` | `60000` | Upstream timeout (max 300000, the reference's recommendation). After a timeout the same credentials are held back for 10 s (Webfleet may still be running the request and would answer 8015). |
 | `WEBFLEET_MAX_RESPONSE_CHARS` | `60000` | Tool output cap (redacted first, then measured). |
 | `WEBFLEET_MAX_UPSTREAM_BYTES` | `4194304` (4 MiB) | Upstream body cap, enforced while streaming (max 128 MiB). |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr and are redacted. |

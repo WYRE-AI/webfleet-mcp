@@ -3,18 +3,21 @@
  * blocks an action once its limit is exceeded and keeps blocking until no
  * request arrives for a whole window; repeated overload can get a client's
  * limits lowered or its access revoked. So this process:
- * - throttles every action per exact credential set and per API key,
- *   refusing locally instead of sending a request that would be rejected.
- *   No bucket is keyed on the account name alone: a slot is spent before
- *   Webfleet checks the password, so such a bucket would let anyone who
+ * - throttles every action per tenant account and its API key, refusing
+ *   locally instead of sending a request that would be rejected. A bucket is
+ *   never shared across accounts (one partner API key can serve many
+ *   tenants), and never keyed on the account name alone: a slot is spent
+ *   before Webfleet checks credentials, so such a bucket would let anyone who
  *   guesses an account name lock its owner out;
  * - serialises requests per exact credential set, as the reference requires
- *   per account/username (error 8015 otherwise);
+ *   per account/username (error 8015 otherwise), and holds a credential set
+ *   back for a while after a request timed out, since Webfleet may still be
+ *   running it;
  * - caches successful responses per exact credential set and request for one
  *   limit interval (window / limit), so a repeated identical call is answered
  *   locally instead of spending the budget.
- * State is per process and bounded: expired throttle keys are swept, both
- * maps have a size cap, and every cache entry is charged a minimum size.
+ * State is per process and bounded: expired throttle keys and holds are swept,
+ * every map has a size cap, and every cache entry is charged a minimum size.
  * Every map key is a SHA-256 hash, so no credential is held here in clear text.
  */
 import { createHash } from 'node:crypto';
@@ -88,14 +91,38 @@ export function cacheGet(key: string, now = Date.now()): { value: unknown } | un
   return { value: entry.value };
 }
 
+/** Keys that must not send before a time (ms epoch). Insertion order is last-hold order. */
+const holds = new Map<string, number>();
+
+/** Holds key back for ms: heldFor(key) is positive until then. */
+export function holdOff(key: string, ms: number, now = Date.now()): void {
+  sweepExpired(now);
+  holds.delete(key);
+  holds.set(key, now + ms);
+  for (const oldest of holds.keys()) {
+    if (holds.size <= MAX_SLOT_KEYS) break;
+    holds.delete(oldest);
+  }
+}
+
+/** Milliseconds until key may send again (0: now). */
+export function heldFor(key: string, now = Date.now()): number {
+  const until = holds.get(key);
+  if (until === undefined) return 0;
+  if (until > now) return until - now;
+  holds.delete(key);
+  return 0;
+}
+
 const SWEEP_INTERVAL_MS = 60_000;
 let lastSweep = 0;
 
-/** At most once per interval, drops throttle keys whose window has passed and expired cache entries. */
+/** At most once per interval, drops throttle keys whose window has passed, expired holds, and expired cache entries. */
 function sweepExpired(now: number): void {
   if (now - lastSweep < SWEEP_INTERVAL_MS) return;
   lastSweep = now;
   for (const [key, s] of sent) if (now - s.times[s.times.length - 1] >= s.windowMs) sent.delete(key);
+  for (const [key, until] of holds) if (until <= now) holds.delete(key);
   for (const [key, entry] of cache) if (entry.expires <= now) evict(key);
 }
 
@@ -135,6 +162,7 @@ export function rateLimitSizes(): { slotKeys: number; cacheEntries: number } {
 /** Test-only. */
 export function resetRateLimits(): void {
   sent.clear();
+  holds.clear();
   lastSweep = 0;
   cache.clear();
   cachedChars = 0;

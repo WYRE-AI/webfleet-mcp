@@ -8,15 +8,16 @@
  *   and password only travel in the Basic Auth header, never the URL;
  * - response bodies are bounded while streaming;
  * - vendor errors keep the HTTP status and the WEBFLEET.connect error code;
- * - per-credential throttle, per-credential serialisation, and a short
- *   response cache (rate-limit.ts) keep the account under Webfleet's limits.
+ * - a per-account throttle, per-credential serialisation, a back-off after
+ *   a timed-out request, and a short response cache (rate-limit.ts) keep the
+ *   account under Webfleet's limits.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ACTIONS, describeLimit, isAllowedAction, type Action } from './actions.js';
 import { basicToken, validateCredentials } from './auth.js';
 import { CREDENTIAL_ENV, isGatewayMode, maxUpstreamBytes, requestTimeoutMs } from './config.js';
-import { cacheGet, cacheSet, hashKey, serialize, takeSlot } from './rate-limit.js';
-import { ArgumentError, CredentialError, ThrottleError, WebfleetApiError, type WebfleetCredentials } from './types.js';
+import { cacheGet, cacheSet, hashKey, heldFor, holdOff, serialize, takeSlot } from './rate-limit.js';
+import { ArgumentError, CredentialError, ThrottleError, UpstreamAbortError, WebfleetApiError, type WebfleetCredentials } from './types.js';
 import { VERSION } from './version.js';
 
 export const WEBFLEET_ORIGIN = 'https://csv.webfleet.com';
@@ -120,6 +121,13 @@ export function buildUrl(creds: Pick<WebfleetCredentials, 'account' | 'apiKey'>,
   return url;
 }
 
+/**
+ * After a request times out or is cancelled, Webfleet may still be running it
+ * and answers the next request for the same user with 8015, whose hint is to
+ * wait at least 10 seconds.
+ */
+export const TIMEOUT_BACKOFF_MS = 10_000;
+
 /** WEBFLEET.connect "no data" response codes: an empty result, not a failure. */
 const EMPTY_RESULT_CODES = new Set(['63', '9198']);
 
@@ -133,9 +141,11 @@ export async function webfleetGet(rawCreds: WebfleetCredentials, action: Action,
   const url = buildUrl(creds, action, params);
   const { limit, windowMs } = ACTIONS[action];
 
-  // Every bucket a caller can fill is keyed on the full credential set (or the
-  // secret API key), never on the guessable account name alone.
+  // Serialisation, back-off, and cache are keyed on the full credential set.
+  // The throttle is per tenant account and its secret API key: never shared
+  // across accounts, never keyed on the guessable account name alone.
   const identity = hashKey(creds.account, creds.username, creds.password, creds.apiKey);
+  const budget = hashKey('budget', creds.account, creds.apiKey, action);
   const cacheKey = hashKey(identity, url.search);
   const hit = cacheGet(cacheKey);
   if (hit) return hit.value;
@@ -147,7 +157,15 @@ export async function webfleetGet(rawCreds: WebfleetCredentials, action: Action,
 
     // A call cancelled while queued must not spend a throttle slot.
     if (callerSignal.getStore()?.aborted) throw new WebfleetApiError(`WEBFLEET.connect ${action} timed out or was cancelled.`);
-    const waitMs = takeSlot([hashKey('identity', identity, action), hashKey('apikey', creds.apiKey, action)], limit, windowMs);
+    const heldMs = heldFor(identity);
+    if (heldMs > 0) {
+      const seconds = Math.ceil(heldMs / 1000);
+      throw new ThrottleError(
+        `Not sent: the previous WEBFLEET.connect request for these credentials timed out or was cancelled and may still be running at Webfleet (it would answer 8015). Retry in ${seconds}s.`,
+        seconds,
+      );
+    }
+    const waitMs = takeSlot([budget], limit, windowMs);
     if (waitMs > 0) {
       const seconds = Math.ceil(waitMs / 1000);
       throw new ThrottleError(
@@ -156,7 +174,14 @@ export async function webfleetGet(rawCreds: WebfleetCredentials, action: Action,
       );
     }
 
-    const { value, chars } = await send(creds, action, url);
+    let sent: { value: unknown; chars: number };
+    try {
+      sent = await send(creds, action, url);
+    } catch (err) {
+      if (err instanceof UpstreamAbortError) holdOff(identity, TIMEOUT_BACKOFF_MS);
+      throw err;
+    }
+    const { value, chars } = sent;
     cacheSet(cacheKey, value, chars, Math.floor(windowMs / limit));
     return value;
   });
@@ -176,8 +201,8 @@ async function send(creds: WebfleetCredentials, action: Action, url: URL): Promi
       signal: requestSignal(),
     });
   } catch (err) {
-    const aborted = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-    throw new WebfleetApiError(aborted ? `WEBFLEET.connect ${action} timed out or was cancelled.` : 'Could not reach WEBFLEET.connect (network error).');
+    if (isAbort(err)) throw new UpstreamAbortError(`WEBFLEET.connect ${action} timed out or was cancelled.`);
+    throw new WebfleetApiError(`Could not reach WEBFLEET.connect (network error${safeCauseCode(err)}).`);
   }
 
   if ((res.status >= 300 && res.status < 400) || res.type === 'opaqueredirect') {
@@ -190,9 +215,8 @@ async function send(creds: WebfleetCredentials, action: Action, url: URL): Promi
     text = (await readBoundedText(res, maxUpstreamBytes())).trim();
   } catch (err) {
     if (err instanceof WebfleetApiError) throw err;
-    const aborted = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-    const message = aborted ? `WEBFLEET.connect ${action} timed out or was cancelled` : 'Could not read the WEBFLEET.connect response (network error)';
-    throw new WebfleetApiError(`${message} (HTTP ${res.status}).`, res.status);
+    if (isAbort(err)) throw new UpstreamAbortError(`WEBFLEET.connect ${action} timed out or was cancelled (HTTP ${res.status}).`, res.status);
+    throw new WebfleetApiError(`Could not read the WEBFLEET.connect response (network error${safeCauseCode(err)}, HTTP ${res.status}).`, res.status);
   }
   const headerCode = res.headers.get('x-webfleet-errorcode')?.trim();
   const parsed = parseBody(text);
@@ -205,6 +229,16 @@ async function send(creds: WebfleetCredentials, action: Action, url: URL): Promi
   if (!text) return { value: [], chars: 2 };
   if (!parsed.json) throw new WebfleetApiError(`WEBFLEET.connect returned a non-JSON body for ${action}.`, res.status);
   return { value: parsed.value, chars: text.length };
+}
+
+function isAbort(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+}
+
+/** ", CODE" from a network error's cause (ENOTFOUND, ECONNRESET, ...) when it is a plain system code; otherwise "". */
+function safeCauseCode(err: unknown): string {
+  const code = (err as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{2,39}$/.test(code) ? `, ${code}` : '';
 }
 
 interface Parsed {

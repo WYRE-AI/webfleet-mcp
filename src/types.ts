@@ -29,6 +29,9 @@ export class WebfleetApiError extends Error {
   }
 }
 
+/** The request was sent but timed out or was cancelled before the full answer arrived; Webfleet may still be running it. */
+export class UpstreamAbortError extends WebfleetApiError {}
+
 /** Refused locally so the account never crosses a WEBFLEET.connect request limit. */
 export class ThrottleError extends Error {
   constructor(
