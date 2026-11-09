@@ -23,4 +23,7 @@ regexes = [
   '''^smoke-password-not-real$''',
   '''^eval-password-not-real$''',
   '''^test-s2s-7Hq2Lw9Zr4Kx8Mv3Nb6Pc1Td5Fg0Yj$''',
+  # Dummy 36-character API key from the original scaffold (.env.example,
+  # README, tests in commit 8e20786b). Still in history, never a real key.
+  '''^0123456789abcdef0123456789abcdef0123$''',
 ]
