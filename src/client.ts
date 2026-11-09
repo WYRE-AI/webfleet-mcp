@@ -145,6 +145,8 @@ export async function webfleetGet(rawCreds: WebfleetCredentials, action: Action,
     const queuedHit = cacheGet(cacheKey);
     if (queuedHit) return queuedHit.value;
 
+    // A call cancelled while queued must not spend a throttle slot.
+    if (callerSignal.getStore()?.aborted) throw new WebfleetApiError(`WEBFLEET.connect ${action} timed out or was cancelled.`);
     const waitMs = takeSlot([hashKey('identity', identity, action), hashKey('apikey', creds.apiKey, action)], limit, windowMs);
     if (waitMs > 0) {
       const seconds = Math.ceil(waitMs / 1000);
@@ -183,7 +185,15 @@ async function send(creds: WebfleetCredentials, action: Action, url: URL): Promi
     throw new WebfleetApiError(`WEBFLEET.connect answered ${action} with a redirect (HTTP ${res.status}); refusing to follow it.`, res.status);
   }
 
-  const text = (await readBoundedText(res, maxUpstreamBytes())).trim();
+  let text: string;
+  try {
+    text = (await readBoundedText(res, maxUpstreamBytes())).trim();
+  } catch (err) {
+    if (err instanceof WebfleetApiError) throw err;
+    const aborted = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    const message = aborted ? `WEBFLEET.connect ${action} timed out or was cancelled` : 'Could not read the WEBFLEET.connect response (network error)';
+    throw new WebfleetApiError(`${message} (HTTP ${res.status}).`, res.status);
+  }
   const headerCode = res.headers.get('x-webfleet-errorcode')?.trim();
   const parsed = parseBody(text);
   const vendor = headerCode

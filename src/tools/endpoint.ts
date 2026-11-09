@@ -119,7 +119,19 @@ function checkString(value: unknown, key: string, p: StringParam): string {
   if (CONTROL.test(s)) throw new ArgumentError(`"${key}" contains control characters.`);
   if (p.enum && !p.enum.includes(s)) throw new ArgumentError(`"${key}" must be one of: ${p.enum.join(', ')}.`);
   if (p.pattern && !p.pattern.test(s)) throw new ArgumentError(`"${key}" must be ${p.patternHint ?? 'well-formed'}.`);
+  if (p.pattern === ISO_8601 && !isValidIsoDateTime(s)) throw new ArgumentError(`"${key}" must be ${p.patternHint ?? 'a valid ISO 8601 date-time'}.`);
   return s;
+}
+
+/** Range checks the ISO_8601 shape cannot make: a real calendar date, clock fields, and offset. */
+function isValidIsoDateTime(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,]\d+)?(?:Z|[+-](\d{2}):(\d{2}))?$/.exec(s);
+  if (!m) return false;
+  const [y, mo, d, h, mi, sec] = m.slice(1, 7).map(Number);
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return false;
+  if (h > 23 || mi > 59 || sec > 59) return false;
+  return m[7] === undefined || (Number(m[7]) <= 23 && Number(m[8]) <= 59);
 }
 
 function queryValue(key: string, p: Param, value: unknown): QueryValue | undefined {
