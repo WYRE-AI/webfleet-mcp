@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.WYRE-AI/webfleet-mcp",
   "title": "Webfleet",
-  "description": "Read-only MCP server for Bridgestone Webfleet (WEBFLEET.connect) fleet telematics data.",
+  "description": "Read-only MCP server for Bridgestone Webfleet (WEBFLEET.connect): vehicles, drivers, trips, tracks, events, KPIs, addresses, and orders.",
   "repository": {
     "url": "https://github.com/WYRE-AI/webfleet-mcp",
     "source": "github"
@@ -19,49 +19,56 @@
       "environmentVariables": [
         {
           "name": "WEBFLEET_ACCOUNT",
-          "description": "WEBFLEET.connect account name",
+          "description": "WEBFLEET.connect account name.",
           "isRequired": true,
-          "format": "string"
-        },
-        {
-          "name": "WEBFLEET_API_KEY",
-          "description": "WEBFLEET.connect API key (exactly 36 characters)",
-          "isRequired": true,
-          "isSecret": true,
           "format": "string"
         },
         {
           "name": "WEBFLEET_USERNAME",
-          "description": "WEBFLEET.connect username (sent as HTTP Basic Auth)",
+          "description": "Webfleet user with the WEBFLEET.connect access right (sent only via HTTP Basic Auth).",
           "isRequired": true,
           "format": "string"
         },
         {
           "name": "WEBFLEET_PASSWORD",
-          "description": "WEBFLEET.connect password (sent as HTTP Basic Auth)",
+          "description": "Password of that user (sent only via HTTP Basic Auth).",
           "isRequired": true,
           "isSecret": true,
           "format": "string"
         },
         {
-          "name": "WEBFLEET_HOST",
-          "description": "WEBFLEET.connect API host. Optional. Defaults to csv.webfleet.com.",
-          "isRequired": false,
-          "default": "csv.webfleet.com",
+          "name": "WEBFLEET_API_KEY",
+          "description": "WEBFLEET.connect API key (exactly 36 characters).",
+          "isRequired": true,
+          "isSecret": true,
           "format": "string"
         },
         {
-          "name": "WEBFLEET_LANG",
-          "description": "Response language code. Optional. Defaults to en.",
+          "name": "WEBFLEET_TOOL_TIERS",
+          "description": "Comma-separated tool tiers. Every tool is read-only, so the only valid value is read (the default). The X-Conduit-Tool-Tiers request header can only narrow this set.",
           "isRequired": false,
-          "default": "en",
+          "default": "read",
           "format": "string"
         },
         {
           "name": "MCP_TRANSPORT",
-          "description": "Transport mode. Fixed to stdio for registry clients; the image itself defaults to http for gateway hosting.",
+          "description": "Must be 'stdio' when run from the registry; the image defaults to 'http' for gateway hosting.",
           "isRequired": true,
           "value": "stdio",
+          "format": "string"
+        },
+        {
+          "name": "AUTH_MODE",
+          "description": "Credential source: 'env' reads WEBFLEET_* locally; 'gateway' expects the X-Webfleet-* headers from the WYRE MCP Gateway and never reads env. The image sets 'gateway', so registry clients must set 'env'.",
+          "isRequired": true,
+          "value": "env",
+          "format": "string"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "description": "Log verbosity: debug, info, warn, error",
+          "isRequired": false,
+          "default": "info",
           "format": "string"
         }
       ]

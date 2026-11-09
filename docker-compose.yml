@@ -1,20 +1,25 @@
 services:
+  # Gateway mode. The WEBFLEET.connect connection arrives per request on the
+  # X-Webfleet-Account, -Username, -Password, and -Api-Key headers. This
+  # service sets no WEBFLEET_* credentials and loads no env_file, so a project
+  # .env cannot inject a static connection. Compose interpolates
+  # CONDUIT_S2S_SECRET from the shell.
   webfleet-mcp:
     build: .
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      - WEBFLEET_ACCOUNT=${WEBFLEET_ACCOUNT}
-      - WEBFLEET_API_KEY=${WEBFLEET_API_KEY}
-      - WEBFLEET_USERNAME=${WEBFLEET_USERNAME}
-      - WEBFLEET_PASSWORD=${WEBFLEET_PASSWORD}
-      - WEBFLEET_HOST=${WEBFLEET_HOST:-csv.webfleet.com}
-      - WEBFLEET_LANG=${WEBFLEET_LANG:-en}
       - MCP_TRANSPORT=http
-      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET}
-      - NODE_ENV=development
-    env_file:
-      - .env
+      - MCP_HTTP_PORT=8080
+      - MCP_HTTP_HOST=0.0.0.0
+      - AUTH_MODE=gateway
+      - WEBFLEET_TOOL_TIERS=read
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET:?set CONDUIT_S2S_SECRET}
+      # - MCP_ALLOWED_HOSTS=localhost,127.0.0.1
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
       interval: 30s
