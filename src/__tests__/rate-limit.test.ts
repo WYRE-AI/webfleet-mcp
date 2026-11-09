@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWithCredentials } from '../client.js';
 import { lockGatewayMode, resetGatewayLock } from '../config.js';
-import { cacheGet, cacheSet, MAX_CACHE_TOTAL_CHARS, takeSlot } from '../rate-limit.js';
+import { cacheGet, cacheSet, MAX_CACHE_TOTAL_CHARS, MAX_SLOT_KEYS, MIN_CACHE_ENTRY_CHARS, rateLimitSizes, takeSlot } from '../rate-limit.js';
 import { getDefaultToolset } from '../tools/index.js';
-import { always, clearEnvCredentials, CREDS, jsonResponse, mockWebfleet, setEnvCredentials, textOf } from './helpers.js';
+import { always, basicOf, clearEnvCredentials, CREDS, jsonResponse, mockWebfleet, setEnvCredentials, textOf, webfleetError } from './helpers.js';
 
 let now = 1_800_000_000_000;
 
@@ -79,6 +79,38 @@ describe('per-account throttle (documented request limits)', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('a wrong-credential caller with the same account name does not consume the real tenant budget', async () => {
+    lockGatewayMode();
+    clearEnvCredentials();
+    const attacker = { ...CREDS, password: 'wrong-password-not-real', apiKey: 'attacker-apikey-not-real-00000000000' };
+    const { calls } = mockWebfleet([
+      always((call) => (call.headers.authorization === basicOf(CREDS.username, CREDS.password) ? jsonResponse([]) : webfleetError('1101', 'User invalid.', 401))),
+    ]);
+    expect((await runWithCredentials(attacker, () => trips('d-1'))).isError).toBe(true);
+    const victim = await runWithCredentials(CREDS, () => trips('d-2'));
+    expect(victim.isError, textOf(victim)).toBeFalsy();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('a caller with the same account and username but a wrong password does not queue ahead of the real tenant', async () => {
+    lockGatewayMode();
+    clearEnvCredentials();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    mockWebfleet([
+      async (call) => {
+        if (call.headers.authorization !== basicOf(CREDS.username, CREDS.password)) await held;
+        return jsonResponse([]);
+      },
+    ]);
+    const attacker = runWithCredentials({ ...CREDS, password: 'wrong-password-not-real' }, () => getDefaultToolset().dispatch('webfleet_object_groups_list', {}));
+    const victim = runWithCredentials(CREDS, () => getDefaultToolset().dispatch('webfleet_driver_groups_list', {}));
+    const outcome = await Promise.race([victim.then(() => 'answered'), new Promise((r) => setTimeout(() => r('queued'), 200))]);
+    release();
+    await attacker;
+    expect(outcome).toBe('answered');
+  });
+
   it('takeSlot records nothing when any key is full', () => {
     expect(takeSlot(['a', 'b'], 1, 60_000, 0)).toBe(0);
     expect(takeSlot(['c', 'b'], 1, 60_000, 10_000)).toBe(50_000);
@@ -129,6 +161,30 @@ describe('response cache (one limit interval, exact credentials and request)', (
     for (let i = 0; i < entries; i++) cacheSet(`k${i}`, i, big, 60_000, 0);
     expect(cacheGet('k0', 1)).toBeUndefined();
     expect(cacheGet(`k${entries - 1}`, 1)).toEqual({ value: entries - 1 });
+  });
+});
+
+describe('bounded state (keys come from caller input)', () => {
+  it('slot keys whose window has passed are swept', () => {
+    for (let i = 0; i < 100; i++) takeSlot([`old-${i}`], 1, 60_000, 0);
+    takeSlot(['new'], 1, 60_000, 61_000);
+    expect(rateLimitSizes().slotKeys).toBe(1);
+  });
+
+  it('the number of slot keys is capped even inside one window', () => {
+    for (let i = 0; i < MAX_SLOT_KEYS + 1000; i++) takeSlot([`k-${i}`], 1, 60_000, 0);
+    expect(rateLimitSizes().slotKeys).toBeLessThanOrEqual(MAX_SLOT_KEYS);
+  });
+
+  it('tiny cached bodies (empty results) are charged a minimum size, so the entry count is capped', () => {
+    for (let i = 0; i < 20_000; i++) cacheSet(`e-${i}`, [], 2, 60_000, 0);
+    expect(rateLimitSizes().cacheEntries).toBeLessThanOrEqual(MAX_CACHE_TOTAL_CHARS / MIN_CACHE_ENTRY_CHARS);
+  });
+
+  it('expired cache entries are swept (at most once a minute) when a new one is stored', () => {
+    for (let i = 0; i < 10; i++) cacheSet(`x-${i}`, i, 10, 1_000, 0);
+    cacheSet('fresh', 1, 10, 1_000, 61_000);
+    expect(rateLimitSizes().cacheEntries).toBe(1);
   });
 });
 

@@ -37,12 +37,15 @@ const TEXT_PATTERNS: Array<[RegExp, string]> = [
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, REDACTED],
 ];
 
-/** Pattern-based redaction plus exact removal of any secrets known for this request. */
+/**
+ * Pattern-based redaction plus exact removal of any secrets known for this
+ * request, also in their JSON-escaped and URL-encoded forms (output is
+ * redacted after JSON.stringify, and vendor errors may echo a query string).
+ */
 export function redactText(text: string, knownSecrets: readonly (string | undefined)[] = []): string {
   let out = text;
-  for (const secret of [...knownSecrets].sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))) {
-    if (secret && secret.length >= 4) out = out.split(secret).join(REDACTED);
-  }
+  const forms = knownSecrets.flatMap((s) => (s && s.length >= 4 ? [s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s)] : []));
+  for (const secret of forms.sort((a, b) => b.length - a.length)) out = out.split(secret).join(REDACTED);
   for (const [pattern, replacement] of TEXT_PATTERNS) out = out.replace(pattern, replacement);
   return out;
 }

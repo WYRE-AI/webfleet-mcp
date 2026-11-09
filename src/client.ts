@@ -8,8 +8,8 @@
  *   and password only travel in the Basic Auth header, never the URL;
  * - response bodies are bounded while streaming;
  * - vendor errors keep the HTTP status and the WEBFLEET.connect error code;
- * - per-account throttle, per-user serialisation, and a short response
- *   cache (rate-limit.ts) keep the account under Webfleet's request limits.
+ * - per-credential throttle, per-credential serialisation, and a short
+ *   response cache (rate-limit.ts) keep the account under Webfleet's limits.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ACTIONS, describeLimit, isAllowedAction, type Action } from './actions.js';
@@ -133,21 +133,23 @@ export async function webfleetGet(rawCreds: WebfleetCredentials, action: Action,
   const url = buildUrl(creds, action, params);
   const { limit, windowMs } = ACTIONS[action];
 
-  const cacheKey = hashKey(creds.account, creds.username, creds.password, creds.apiKey, url.search);
+  // Every bucket a caller can fill is keyed on the full credential set (or the
+  // secret API key), never on the guessable account name alone.
+  const identity = hashKey(creds.account, creds.username, creds.password, creds.apiKey);
+  const cacheKey = hashKey(identity, url.search);
   const hit = cacheGet(cacheKey);
   if (hit) return hit.value;
 
-  const userKey = hashKey('user', creds.account.toLowerCase(), creds.username.toLowerCase());
-  return serialize(userKey, async () => {
+  return serialize(identity, async () => {
     // A call queued behind an identical one is answered by its result.
     const queuedHit = cacheGet(cacheKey);
     if (queuedHit) return queuedHit.value;
 
-    const waitMs = takeSlot([hashKey('account', creds.account.toLowerCase(), action), hashKey('apikey', creds.apiKey, action)], limit, windowMs);
+    const waitMs = takeSlot([hashKey('identity', identity, action), hashKey('apikey', creds.apiKey, action)], limit, windowMs);
     if (waitMs > 0) {
       const seconds = Math.ceil(waitMs / 1000);
       throw new ThrottleError(
-        `Not sent: WEBFLEET.connect allows ${describeLimit(action)} for ${action}, and this account has used that budget. Retry in ${seconds}s. (Exceeding the limit makes Webfleet block the action and can get API access reduced.)`,
+        `Not sent: WEBFLEET.connect allows ${describeLimit(action)} for ${action}, and these credentials have used that budget. Retry in ${seconds}s. (Exceeding the limit makes Webfleet block the action and can get API access reduced.)`,
         seconds,
       );
     }

@@ -35,6 +35,14 @@ describe('redaction', () => {
     expect(maxUpstreamBytes()).toBe(4 * 1024 * 1024);
   });
 
+  it('redacts a known secret in its JSON-escaped and URL-encoded forms', () => {
+    const secret = 'pa"ss\\word&x';
+    const json = renderSafe([{ note: `echo ${secret}` }], 10_000, [secret]);
+    expect(json).not.toContain(JSON.stringify(secret).slice(1, -1));
+    expect(json).toContain(REDACTED);
+    expect(redactText(`q=${encodeURIComponent(secret)}`, [secret])).toBe(`q=${REDACTED}`);
+  });
+
   it('redacts before truncating so a secret cannot survive as a prefix', () => {
     const out = renderSafe(`${'x'.repeat(10)}${FAKE_API_KEY}`, 30, [FAKE_API_KEY]);
     expect(out).not.toContain(FAKE_API_KEY.slice(0, 12));
