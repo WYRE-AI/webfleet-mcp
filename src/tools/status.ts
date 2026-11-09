@@ -1,44 +1,36 @@
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { ACTIONS, API_PATH, API_REFERENCE, DEFAULT_HOST, SERVER_NAME, SERVER_VERSION } from '../constants.js';
-import { getCredentials } from '../credentials.js';
-import { toolText, type ToolResult } from './result.js';
+import { WEBFLEET_ORIGIN, WEBFLEET_PATH, resolveCredentials } from '../client.js';
+import { isGatewayMode } from '../config.js';
+import { validateCredentials } from '../auth.js';
+import { VERSION } from '../version.js';
+import { READ_ONLY } from './endpoint.js';
+import type { ToolDef } from './types.js';
 
-export const statusTool: Tool = {
-  name: 'webfleet_status',
-  description:
-    'Report WEBFLEET.connect MCP configuration. This does not call the Webfleet API. ' +
-    'Credentials stay out of the response. Username and password use HTTP Basic Auth; ' +
-    'account and the 36-character apikey are query parameters.',
-  inputSchema: {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
+/** Local only: reports configuration and whether usable credentials are in scope. Never calls Webfleet and never returns a credential value. */
+export const statusTool: ToolDef = {
+  tier: 'read',
+  tool: {
+    name: 'webfleet_status',
+    description:
+      'Report this server\'s WEBFLEET.connect configuration: base URL, credential mode, and whether usable credentials are present. ' +
+      'Does not call Webfleet (so it uses no request quota) and never returns credential values.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { ...READ_ONLY, openWorldHint: false },
+  },
+  handler: async () => {
+    let credentials: { usable: boolean; problem?: string };
+    try {
+      validateCredentials(resolveCredentials());
+      credentials = { usable: true };
+    } catch (err) {
+      credentials = { usable: false, problem: err instanceof Error ? err.message : 'unknown' };
+    }
+    return {
+      server: 'webfleet-mcp',
+      version: VERSION,
+      baseUrl: `${WEBFLEET_ORIGIN}${WEBFLEET_PATH}`,
+      credentialMode: isGatewayMode() ? 'gateway (X-Webfleet-* headers)' : 'env (WEBFLEET_* variables)',
+      credentials,
+      auth: 'account and apikey as query parameters; username and password via HTTP Basic Auth only',
+    };
   },
 };
-
-export async function handleStatus(): Promise<ToolResult> {
-  const loaded = getCredentials();
-  const host = loaded.credentials?.host ?? DEFAULT_HOST;
-
-  return toolText({
-    ok: true,
-    server: SERVER_NAME,
-    version: SERVER_VERSION,
-    reference: API_REFERENCE,
-    baseUrl: `https://${host}${API_PATH}`,
-    host,
-    outputformat: 'json',
-    hasCredentials: Boolean(loaded.credentials),
-    ...(loaded.error ? { credentialError: loaded.error } : {}),
-    auth: {
-      query: ['account', 'apikey'],
-      header: 'Authorization: Basic base64(username:password)',
-    },
-    actions: {
-      objects: ACTIONS.objectReport,
-      vehicles: ACTIONS.vehicleReport,
-      trips: ACTIONS.tripReport,
-    },
-    tools: ['webfleet_status', 'webfleet_objects_list', 'webfleet_trips', 'webfleet_raw_request'],
-  });
-}
