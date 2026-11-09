@@ -1,0 +1,16 @@
+name: a malformed WEBFLEET.connect API key returns is_error in stdio without calling out
+server:
+  command: node
+  args: [dist/index.js]
+  env:
+    WEBFLEET_ACCOUNT: eval-account
+    WEBFLEET_USERNAME: eval-user
+    WEBFLEET_PASSWORD: eval-password-not-real
+    WEBFLEET_API_KEY: eval-short-key
+assert:
+  tool: webfleet_vehicles_list
+  args: {}
+  expect:
+    is_error: true
+    contains: ["exactly 36 characters"]
+timeout: 30s

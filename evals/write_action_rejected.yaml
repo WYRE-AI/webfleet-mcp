@@ -1,0 +1,17 @@
+name: a write or queue action through the raw tool is rejected before any upstream call
+server:
+  command: node
+  args: [dist/index.js]
+  env:
+    WEBFLEET_ACCOUNT: eval-account
+    WEBFLEET_USERNAME: eval-user
+    WEBFLEET_PASSWORD: eval-password-not-real
+    WEBFLEET_API_KEY: eval-short-key
+assert:
+  tool: webfleet_raw_request
+  args:
+    action: popQueueMessagesExtern
+  expect:
+    is_error: true
+    contains: ["allowed read-only actions"]
+timeout: 30s
